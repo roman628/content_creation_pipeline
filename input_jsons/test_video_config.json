@@ -1,0 +1,86 @@
+{
+  "video_name": "motivational_morning_routine",
+  "target_platform": "tiktok",
+  "target_duration_seconds": 30,
+  "background_music_genre": "lofi",
+  "voice_name": "af_bella",
+  "script_segments": [
+    {
+      "segment_id": 1,
+      "audio_text": "Wake up at 5 AM every single day. This is the foundation of success.",
+      "duration_target_seconds": 6,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "sunrise morning person waking up",
+          "min_duration": 5,
+          "display_duration": 6
+        }
+      ]
+    },
+    {
+      "segment_id": 2,
+      "audio_text": "Start your day with a cold shower. It activates your mind and builds mental toughness.",
+      "duration_target_seconds": 8,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "cold shower water running",
+          "min_duration": 4,
+          "display_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "person exercising morning",
+          "min_duration": 3,
+          "display_duration": 4
+        }
+      ]
+    },
+    {
+      "segment_id": 3,
+      "audio_text": "Exercise for at least 30 minutes. Push your body to its limits.",
+      "duration_target_seconds": 7,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person doing pushups workout",
+          "min_duration": 6,
+          "display_duration": 7
+        }
+      ]
+    },
+    {
+      "segment_id": 4,
+      "audio_text": "Read for 20 minutes. Feed your mind with knowledge every single morning.",
+      "duration_target_seconds": 6,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person reading book coffee",
+          "min_duration": 5,
+          "display_duration": 6
+        }
+      ]
+    },
+    {
+      "segment_id": 5,
+      "audio_text": "This is how you win the day before it even starts.",
+      "duration_target_seconds": 3,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "successful person sunrise motivation",
+          "min_duration": 3,
+          "display_duration": 3
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "niche": "motivation",
+    "hook_type": "morning_routine",
+    "created_at": "2026-01-29T10:00:00Z",
+    "description": "30-second motivational video about morning routines for success"
+  }
+}

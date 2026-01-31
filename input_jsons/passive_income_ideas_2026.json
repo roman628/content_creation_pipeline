@@ -1,0 +1,184 @@
+{
+  "video_name": "5_passive_income_ideas_2026",
+  "target_platform": "youtube_shorts",
+  "target_duration_seconds": 58,
+  "background_music_genre": "trap",
+  "voice_name": "am_michael",
+  "script_segments": [
+    {
+      "segment_id": 1,
+      "audio_text": "Five passive income streams that actually made me money in 2026. Number four is insane.",
+      "duration_target_seconds": 6,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "money cash falling animation",
+          "min_duration": 3
+        },
+        {
+          "type": "video",
+          "search_query": "person counting money excited",
+          "min_duration": 3
+        }
+      ]
+    },
+    {
+      "segment_id": 2,
+      "audio_text": "Number one: Print on demand. I upload designs to Printful and earn twenty to thirty dollars per sale with zero inventory.",
+      "duration_target_seconds": 8,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "t-shirt printing process factory",
+          "min_duration": 4
+        },
+        {
+          "type": "image",
+          "search_query": "printful dashboard earnings screenshot",
+          "min_duration": 4
+        }
+      ]
+    },
+    {
+      "segment_id": 3,
+      "audio_text": "Number two: Digital products on Etsy. I sell Notion templates and Canva presets. Made fifteen hundred dollars last month alone.",
+      "duration_target_seconds": 9,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person designing on laptop creative workspace",
+          "min_duration": 3
+        },
+        {
+          "type": "image",
+          "search_query": "etsy shop dashboard sales graph",
+          "min_duration": 3
+        },
+        {
+          "type": "video",
+          "search_query": "digital planner template aesthetic",
+          "min_duration": 3
+        }
+      ]
+    },
+    {
+      "segment_id": 4,
+      "audio_text": "Number three: YouTube automation. I hired editors and voiceover artists. The channel runs itself and brings in two thousand monthly.",
+      "duration_target_seconds": 9,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "youtube studio analytics revenue",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "video editing software timeline",
+          "min_duration": 5
+        }
+      ]
+    },
+    {
+      "segment_id": 5,
+      "audio_text": "Number four: This AI tool creates full blog posts. I run ten niche sites that earn through ads and affiliate links. Five thousand per month passive.",
+      "duration_target_seconds": 11,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "AI robot typing on computer futuristic",
+          "min_duration": 4
+        },
+        {
+          "type": "image",
+          "search_query": "google analytics traffic dashboard",
+          "min_duration": 3
+        },
+        {
+          "type": "video",
+          "search_query": "money passive income phone app",
+          "min_duration": 4
+        }
+      ]
+    },
+    {
+      "segment_id": 6,
+      "audio_text": "Number five: Stock photography. My weekend photos earn royalties on Shutterstock every single day. Four hundred monthly on autopilot.",
+      "duration_target_seconds": 9,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "photographer taking landscape photos nature",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "stock photo website upload interface",
+          "min_duration": 5
+        }
+      ]
+    },
+    {
+      "segment_id": 7,
+      "audio_text": "Follow for the exact step-by-step process for each. Which one are you trying first?",
+      "duration_target_seconds": 6,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person pointing at camera call to action",
+          "min_duration": 6
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "niche": "finance_passive_income",
+    "hook_type": "numbered_list_curiosity",
+    "target_audience": "aspiring entrepreneurs 20-35",
+    "key_benefit": "multiple income streams under $1000 startup cost",
+    "cta_goal": "follow_and_comment",
+    "viral_elements": ["specific_numbers", "relatable_results", "list_format"],
+    "created_at": "2026-01-31T14:30:00Z",
+    "title": "5 Passive Income Streams That Made Me $13k/Month 💰",
+    "description": "These 5 passive income ideas actually work in 2026. I tested them all and earned $13,000 last month with minimal daily effort.\n\n💸 Income Breakdown:\n1️⃣ Print on Demand: $20-30 per sale\n2️⃣ Digital Products (Etsy): $1,500/month\n3️⃣ YouTube Automation: $2,000/month\n4️⃣ AI Blog Network: $5,000/month\n5️⃣ Stock Photography: $400/month\n\nNo fancy courses needed. Just consistent action.\n\n🎯 Follow for detailed tutorials on each method!\n💬 Comment which one you're starting with\n\n#passiveincome #makemoneyonline #sidehustle #financialfreedom #entrepreneurship #digitalproducts #printOnDemand #affiliate #2026 #wealthbuilding",
+    "hashtags": [
+      "passiveincome",
+      "makemoneyonline",
+      "sidehustle",
+      "financialfreedom",
+      "entrepreneurship",
+      "digitalproducts",
+      "printondemand",
+      "affiliate",
+      "wealthbuilding",
+      "onlinebusiness",
+      "workfromhome",
+      "businessideas"
+    ],
+    "caption_short": "5 passive income streams = $13k/month 💰 Which one are you trying? #passiveincome #makemoneyonline",
+    "thumbnail_text": "$13K/MO FROM HOME",
+    "category": "Education",
+    "keywords": [
+      "passive income ideas",
+      "make money online 2026",
+      "side hustle",
+      "digital products",
+      "print on demand",
+      "youtube automation",
+      "affiliate marketing"
+    ],
+    "posting_schedule": {
+      "best_times": ["6-8 AM", "12-1 PM", "8-10 PM"],
+      "best_days": ["Tuesday", "Thursday", "Sunday"],
+      "timezone": "EST"
+    },
+    "engagement_tactics": [
+      "numbered_list",
+      "specific_earnings",
+      "relatability",
+      "curiosity_gap_number_4",
+      "comment_question"
+    ],
+    "content_warnings": [],
+    "age_restriction": false
+  }
+}

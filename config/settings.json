@@ -1,0 +1,50 @@
+{
+  "platform_resolutions": {
+    "youtube_shorts": {"width": 1080, "height": 1920, "aspect": "9:16"},
+    "tiktok": {"width": 1080, "height": 1920, "aspect": "9:16"},
+    "instagram_reels": {"width": 1080, "height": 1920, "aspect": "9:16"},
+    "youtube_long": {"width": 1920, "height": 1080, "aspect": "16:9"}
+  },
+  "subtitle_styles": {
+    "tiktok": {
+      "font": "Montserrat-Bold",
+      "fontsize": 28,
+      "fontcolor": "yellow",
+      "highlight_color": "white",
+      "outline_color": "black",
+      "outline_width": 3,
+      "position_y": "h-150",
+      "max_lines": 2
+    },
+    "youtube_shorts": {
+      "font": "Impact",
+      "fontsize": 32,
+      "fontcolor": "yellow",
+      "highlight_color": "white",
+      "outline_color": "black",
+      "outline_width": 3,
+      "position_y": "h-150",
+      "max_lines": 2
+    }
+  },
+  "background_music": {
+    "volume_db": -22,
+    "fade_in_seconds": 2,
+    "fade_out_seconds": 2
+  },
+  "api_limits": {
+    "pexels_requests_per_hour": 200,
+    "pixabay_requests_per_hour": 5000,
+    "cache_duration_hours": 24
+  },
+  "video_processing": {
+    "duration_tolerance_seconds": 1.0,
+    "speed_adjustment_range": [0.8, 0.9],
+    "min_clip_duration": 2
+  },
+  "kokoro_settings": {
+    "voice_models": ["af_heart", "af_bella", "af_sarah", "af_adam", "af_michael"],
+    "speed": 1.0,
+    "use_gpu": true
+  }
+}

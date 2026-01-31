@@ -1,0 +1,5 @@
+{
+  "pexels": "YOUR_PEXELS_API_KEY_HERE",
+  "pixabay": "YOUR_PIXABAY_API_KEY_HERE",
+  "note": "Copy this file to api_keys.json and replace with your actual API keys. Get keys from: Pexels: https://www.pexels.com/api/ | Pixabay: https://pixabay.com/api/docs/"
+}
