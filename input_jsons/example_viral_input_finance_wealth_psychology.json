@@ -1,0 +1,182 @@
+{
+  "video_name": "your_brain_is_keeping_you_broke",
+  "target_platform": "youtube_shorts",
+  "target_duration_seconds": 55,
+  "background_music_genre": "trap",
+  "voice_name": "am_adam",
+  "script_segments": [
+    {
+      "segment_id": 1,
+      "audio_text": "Your brain is hardwired to keep you broke. And it has nothing to do with how much money you make.",
+      "duration_target_seconds": 8,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person stressed empty wallet bills table",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "brain neuron electricity decision making",
+          "min_duration": 4
+        }
+      ]
+    },
+    {
+      "segment_id": 2,
+      "audio_text": "It is called present bias. A hundred dollars today feels more real to your brain than five hundred dollars next year. So saving feels like a threat, and spending feels like relief.",
+      "duration_target_seconds": 13,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person impulse buying online shopping phone",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "cash money temptation spending hand",
+          "min_duration": 4
+        },
+        {
+          "type": "image",
+          "search_query": "present bias behavioral economics chart",
+          "min_duration": 3
+        }
+      ]
+    },
+    {
+      "segment_id": 3,
+      "audio_text": "This is why seventy percent of lottery winners go broke within five years. More money did not fix the pattern. It just amplified it.",
+      "duration_target_seconds": 9,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "lottery winner celebration jumping excited",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "person going broke debt financial stress",
+          "min_duration": 5
+        }
+      ]
+    },
+    {
+      "segment_id": 4,
+      "audio_text": "It is also why every time your income goes up, your expenses mysteriously rise to match it. That is not a discipline problem. That is your biology.",
+      "duration_target_seconds": 9,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "luxury car dealership showroom expensive",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "person upgrading apartment moving new home",
+          "min_duration": 5
+        }
+      ]
+    },
+    {
+      "segment_id": 5,
+      "audio_text": "The workaround: automate your savings before your paycheck ever touches your account. Remove the choice entirely. Your brain cannot spend money it never sees. Fifty dollars a month over thirty years becomes sixty thousand dollars.",
+      "duration_target_seconds": 13,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person setting up automatic bank transfer phone",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "coins growing piggy bank savings jar",
+          "min_duration": 4
+        },
+        {
+          "type": "image",
+          "search_query": "compound interest growth chart investment",
+          "min_duration": 3
+        }
+      ]
+    },
+    {
+      "segment_id": 6,
+      "audio_text": "Follow for more wealth psychology that actually makes sense. And comment below: are you saving first or spending first?",
+      "duration_target_seconds": 7,
+      "broll_clips": [
+        {
+          "type": "video",
+          "search_query": "person smiling pointing camera direct",
+          "min_duration": 4
+        },
+        {
+          "type": "video",
+          "search_query": "financial freedom laptop successful person",
+          "min_duration": 3
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "niche": "behavioral_finance_wealth_psychology",
+    "hook_type": "contrarian_shocking_truth",
+    "target_audience": "ambitious earners 22-38 who feel stuck despite making more money",
+    "key_benefit": "understand the psychological root cause of lifestyle inflation and get one actionable fix",
+    "cta_goal": "follow_and_comment",
+    "viral_elements": [
+      "contrarian_hook",
+      "scientific_credibility",
+      "shocking_statistic",
+      "relatable_pattern_recognition",
+      "specific_numbers",
+      "comment_polarizing_question"
+    ],
+    "created_at": "2026-02-25T12:00:00Z",
+    "title": "Your Brain Is Literally Wired to Keep You Broke 🧠💸",
+    "description": "Most people think staying broke is an income problem. It's actually a brain problem — and once you understand present bias, everything changes.\n\n🧠 What you'll learn:\n- Why your brain treats saving as a physical threat\n- The real reason 70% of lottery winners go broke in 5 years\n- How lifestyle inflation is biology, not laziness\n- The one automation trick that bypasses your brain's spending urge\n\n💡 The fix is simple. The psychology is fascinating.\n\n📌 Save this for when you get your next raise.\n💬 Comment: Do you save first or spend first?\n\n#wealthpsychology #personalfinance #behavioralfinance #moneyhabits #financialfreedom #presentbias #lifestyleinflation #savingmoney #moneypsychology #broke #richvspoor #moneyminds",
+    "hashtags": [
+      "wealthpsychology",
+      "personalfinance",
+      "behavioralfinance",
+      "moneyhabits",
+      "financialfreedom",
+      "presentbias",
+      "lifestyleinflation",
+      "savingmoney",
+      "moneypsychology",
+      "financialliteracy",
+      "wealthbuilding",
+      "richvspoor"
+    ],
+    "caption_short": "Your brain is literally hardwired to keep you broke 🧠 Here's the fix #personalfinance #wealthpsychology",
+    "thumbnail_text": "YOUR BRAIN IS KEEPING YOU BROKE",
+    "category": "Education",
+    "keywords": [
+      "present bias explained",
+      "why people stay broke",
+      "lifestyle inflation psychology",
+      "behavioral finance 2026",
+      "wealth psychology",
+      "automatic savings habit",
+      "lottery winner broke statistics",
+      "pay yourself first system"
+    ],
+    "posting_schedule": {
+      "best_times": ["7-9 AM", "12-1 PM", "8-10 PM"],
+      "best_days": ["Monday", "Wednesday", "Friday"],
+      "timezone": "EST"
+    },
+    "engagement_tactics": [
+      "pattern_interrupt_hook",
+      "scientific_backing",
+      "relatable_shared_experience",
+      "specific_stat_70_percent",
+      "specific_numbers_60k",
+      "polarizing_comment_question",
+      "save_this_post_cta"
+    ],
+    "content_warnings": [],
+    "age_restriction": false
+  }
+}

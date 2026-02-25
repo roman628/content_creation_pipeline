@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
 B-Roll Fetcher
-Downloads and processes video/image assets from Pexels and Pixabay APIs
+Downloads and processes video/image assets from Pexels and Pixabay APIs.
+Supports fast 2-3 second cuts with speed adjustment for engaging short-form video.
 """
 
 import argparse
 import json
 import logging
+import math
 import os
+import random
 import sys
 import time
 import hashlib
@@ -212,7 +215,6 @@ class BRollFetcher:
             video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
             input_width = int(video_info['width'])
             input_height = int(video_info['height'])
-            duration = float(video_info.get('duration', 0))
 
             # Calculate crop/scale parameters
             input_aspect = input_width / input_height
@@ -239,7 +241,7 @@ class BRollFetcher:
             # Apply speed adjustment if needed
             if speed_factor != 1.0:
                 video_stream = video_stream.filter('setpts', f'{1/speed_factor}*PTS')
-                self.logger.info(f"Applying speed factor: {speed_factor}x")
+                self.logger.info(f"Applying speed factor: {speed_factor:.2f}x")
 
             # Crop and scale
             video_stream = video_stream.filter('crop', scale_width, scale_height, crop_x, crop_y)
@@ -267,56 +269,136 @@ class BRollFetcher:
             self.logger.error(f"Video processing failed: {e}")
             return False
 
-    def process_image(self, input_path: str, output_path: str, target_resolution: Tuple[int, int]) -> bool:
-        """Process image: crop/scale to target resolution."""
+    def process_image(self, input_path: str, output_path: str, target_resolution: Tuple[int, int],
+                      target_duration: Optional[float] = None) -> bool:
+        """Process image: crop/scale to target resolution and convert to video clip.
+
+        Always outputs an .mp4 video (still frame) so the assembler can concatenate it
+        with other video clips seamlessly.
+        """
         try:
             width, height = target_resolution
             self.logger.info(f"Processing image: {input_path} -> {width}x{height}")
 
+            # First crop/scale the image
             with Image.open(input_path) as img:
                 img = img.convert('RGB')
                 input_width, input_height = img.size
 
-                # Calculate crop box for center crop
                 input_aspect = input_width / input_height
                 target_aspect = width / height
 
                 if input_aspect > target_aspect:
-                    # Image is wider, crop width
                     new_width = int(input_height * target_aspect)
                     left = (input_width - new_width) // 2
                     box = (left, 0, left + new_width, input_height)
                 else:
-                    # Image is taller, crop height
                     new_height = int(input_width / target_aspect)
                     top = (input_height - new_height) // 2
                     box = (0, top, input_width, top + new_height)
 
                 img = img.crop(box)
                 img = img.resize((width, height), Image.Resampling.LANCZOS)
-                img.save(output_path, quality=95)
 
-            self.logger.info(f"Image processed: {output_path}")
+                # Save processed image to temp file
+                temp_img = output_path.replace('.mp4', '_img.jpg')
+                img.save(temp_img, quality=95)
+
+            # Convert still image to video clip using FFmpeg
+            duration = target_duration if target_duration else 3.0
+            self.logger.info(f"Converting image to {duration:.2f}s video clip")
+
+            # Ensure output is .mp4
+            if not output_path.endswith('.mp4'):
+                output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+
+            stream = ffmpeg.input(temp_img, loop=1, t=duration, framerate=30)
+            stream = ffmpeg.output(stream, output_path,
+                                   vcodec='libx264',
+                                   crf=23,
+                                   preset='medium',
+                                   r=30,
+                                   pix_fmt='yuv420p',
+                                   movflags='faststart',
+                                   loglevel='error')
+            ffmpeg.run(stream, overwrite_output=True)
+
+            # Cleanup temp image
+            if os.path.exists(temp_img):
+                os.remove(temp_img)
+
+            self.logger.info(f"Image converted to video: {output_path}")
             return True
 
         except Exception as e:
             self.logger.error(f"Image processing failed: {e}")
             return False
 
-    def fetch_for_segment(self, config: Dict, segment_id: int, output_dir: str, resolution: Tuple[int, int], audio_dir: Optional[str] = None) -> bool:
-        """Fetch and process b-roll for a specific segment."""
+    def _expand_search_queries(self, broll_clips: List[Dict], num_needed: int) -> List[Dict]:
+        """Expand clip list by generating query variations when more clips are needed."""
+        expanded = list(broll_clips)
+        suffixes = ['cinematic', 'aerial', 'close up', 'dramatic', 'slow motion',
+                     'abstract', 'nature', 'urban', 'texture', 'background']
+        idx = 0
+        while len(expanded) < num_needed:
+            base_clip = broll_clips[idx % len(broll_clips)]
+            variation = dict(base_clip)
+            suffix = suffixes[(len(expanded) - len(broll_clips)) % len(suffixes)]
+            variation['search_query'] = f"{base_clip['search_query']} {suffix}"
+            expanded.append(variation)
+            idx += 1
+        return expanded[:num_needed]
+
+    def _get_download_url(self, media_item: Dict, clip_type: str) -> Optional[str]:
+        """Extract download URL from API result item."""
+        if clip_type == 'video':
+            if 'video_files' in media_item:  # Pexels
+                video_files = media_item['video_files']
+                video_file = next((v for v in video_files if v.get('quality') == 'hd'), video_files[0])
+                return video_file['link']
+            elif 'videos' in media_item:  # Pixabay
+                videos = media_item['videos']
+                video_file = videos.get('medium', videos.get('small', {}))
+                return video_file.get('url', '')
+        else:
+            if 'src' in media_item:  # Pexels
+                return media_item['src'].get('large2x', media_item['src'].get('large'))
+            elif 'largeImageURL' in media_item:  # Pixabay
+                return media_item['largeImageURL']
+        return None
+
+    def _search_with_fallback(self, query: str, clip_type: str, result_index: int = 0) -> Optional[Dict]:
+        """Search Pexels then Pixabay, return a single result item."""
+        results = self.search_pexels(query, clip_type)
+        if not results:
+            results = self.search_pixabay(query, clip_type)
+        if not results:
+            return None
+        # Use result_index to get different results from same query
+        idx = result_index % len(results)
+        return results[idx]
+
+    def fetch_for_segment(self, config: Dict, segment_id: int, output_dir: str,
+                          resolution: Tuple[int, int], segment_duration: Optional[float] = None,
+                          audio_dir: Optional[str] = None,
+                          cut_frequency: float = 2.5,
+                          speed_range: Tuple[float, float] = (1.2, 2.0)) -> bool:
+        """Fetch and process b-roll for a specific segment with fast cuts."""
         try:
-            # Get audio duration for this segment if audio_dir provided
-            target_duration = None
-            if audio_dir:
+            # Get segment duration from audio file if not provided directly
+            if segment_duration is None and audio_dir:
                 audio_file = Path(audio_dir) / f"segment_{segment_id:03d}.wav"
                 if audio_file.exists():
                     try:
                         probe = ffmpeg.probe(str(audio_file))
-                        target_duration = float(probe['format']['duration'])
-                        self.logger.info(f"Target duration from audio: {target_duration:.2f}s")
+                        segment_duration = float(probe['format']['duration'])
+                        self.logger.info(f"Target duration from audio: {segment_duration:.2f}s")
                     except Exception as e:
                         self.logger.warning(f"Could not read audio duration: {e}")
+
+            if segment_duration is None:
+                self.logger.error(f"No segment duration available for segment {segment_id}")
+                return False
 
             # Find segment in config
             script_segments = config.get('script_segments', [])
@@ -331,105 +413,79 @@ class BRollFetcher:
                 self.logger.warning(f"No b-roll clips defined for segment {segment_id}")
                 return False
 
-            self.logger.info(f"Fetching {len(broll_clips)} b-roll clips for segment {segment_id}")
+            # Calculate how many clips we need for fast cuts
+            num_clips_needed = max(1, math.ceil(segment_duration / cut_frequency))
+            clip_display_duration = segment_duration / num_clips_needed
+
+            self.logger.info(
+                f"Segment {segment_id}: {segment_duration:.2f}s, "
+                f"need {num_clips_needed} clips at {clip_display_duration:.2f}s each"
+            )
+
+            # Expand clips if we need more than what's in the JSON
+            if num_clips_needed > len(broll_clips):
+                self.logger.info(
+                    f"Expanding from {len(broll_clips)} to {num_clips_needed} clips via query variations"
+                )
+                broll_clips = self._expand_search_queries(broll_clips, num_clips_needed)
 
             os.makedirs(output_dir, exist_ok=True)
             success_count = 0
 
-            # Calculate duration per clip if we have a target
-            if target_duration and len(broll_clips) > 0:
-                duration_per_clip = target_duration / len(broll_clips)
-            else:
-                duration_per_clip = None
-
-            for idx, clip in enumerate(broll_clips):
+            for idx, clip in enumerate(broll_clips[:num_clips_needed]):
                 clip_type = clip.get('type', 'video')
                 search_query = clip.get('search_query', '')
-                min_duration = clip.get('min_duration', 3)
-
-                # Use calculated duration from audio if available, otherwise fall back to JSON
-                if duration_per_clip:
-                    display_duration = duration_per_clip
-                    self.logger.info(f"Clip {idx}: Using calculated duration {display_duration:.2f}s")
-                else:
-                    display_duration = clip.get('display_duration', min_duration)
 
                 if not search_query:
                     self.logger.warning(f"Clip {idx} has no search_query, skipping")
                     continue
 
-                # Search Pexels first
-                results = self.search_pexels(search_query, clip_type)
+                # Search with fallback, use idx to get different results
+                media_item = self._search_with_fallback(search_query, clip_type, result_index=idx)
 
-                # Fallback to Pixabay if Pexels fails
-                if not results:
-                    self.logger.info("Pexels failed, trying Pixabay...")
-                    results = self.search_pixabay(search_query, clip_type)
-
-                if not results:
+                if not media_item:
                     self.logger.error(f"No results found for '{search_query}'")
                     continue
 
-                # Get first suitable result
-                media_item = results[0]
+                download_url = self._get_download_url(media_item, clip_type)
+                if not download_url:
+                    self.logger.error(f"Could not extract download URL for '{search_query}'")
+                    continue
 
                 if clip_type == 'video':
-                    # Extract video URL (highest quality)
-                    if 'video_files' in media_item:  # Pexels
-                        video_files = media_item['video_files']
-                        # Prefer HD quality
-                        video_file = next((v for v in video_files if v.get('quality') == 'hd'), video_files[0])
-                        download_url = video_file['link']
-                    elif 'videos' in media_item:  # Pixabay
-                        videos = media_item['videos']
-                        # Get medium quality
-                        video_file = videos.get('medium', videos.get('small', {}))
-                        download_url = video_file.get('url', '')
-                    else:
-                        self.logger.error("Unexpected video format")
-                        continue
-
                     # Download video
                     temp_file = os.path.join(output_dir, f"segment_{segment_id:03d}_clip_{idx:03d}_temp.mp4")
                     if not self.download_media(download_url, temp_file):
                         continue
 
-                    # Process video (crop, scale, adjust speed if needed)
+                    # Apply random speed factor for more dynamic feel
+                    speed_factor = random.uniform(speed_range[0], speed_range[1])
+
                     output_file = os.path.join(output_dir, f"segment_{segment_id:03d}_clip_{idx:03d}.mp4")
-
-                    # Calculate speed adjustment if needed (slow down to stretch duration)
-                    speed_factor = 0.85 if display_duration > min_duration else 1.0
-
-                    if self.process_video(temp_file, output_file, resolution, display_duration, speed_factor):
+                    if self.process_video(temp_file, output_file, resolution, clip_display_duration, speed_factor):
                         success_count += 1
-                        os.remove(temp_file)  # Clean up temp file
+                        os.remove(temp_file)
                     else:
                         self.logger.error(f"Failed to process video clip {idx}")
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
 
                 else:  # image
-                    # Extract image URL
-                    if 'src' in media_item:  # Pexels
-                        download_url = media_item['src'].get('large2x', media_item['src'].get('large'))
-                    elif 'largeImageURL' in media_item:  # Pixabay
-                        download_url = media_item['largeImageURL']
-                    else:
-                        self.logger.error("Unexpected image format")
-                        continue
-
-                    # Download image
                     temp_file = os.path.join(output_dir, f"segment_{segment_id:03d}_clip_{idx:03d}_temp.jpg")
                     if not self.download_media(download_url, temp_file):
                         continue
 
-                    # Process image
-                    output_file = os.path.join(output_dir, f"segment_{segment_id:03d}_clip_{idx:03d}.jpg")
-                    if self.process_image(temp_file, output_file, resolution):
+                    # Output as .mp4 (still frame converted to video) so assembler can concatenate
+                    output_file = os.path.join(output_dir, f"segment_{segment_id:03d}_clip_{idx:03d}.mp4")
+                    if self.process_image(temp_file, output_file, resolution, clip_display_duration):
                         success_count += 1
-                        os.remove(temp_file)  # Clean up temp file
+                        os.remove(temp_file)
                     else:
                         self.logger.error(f"Failed to process image clip {idx}")
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
 
-            self.logger.info(f"B-roll fetch complete: {success_count}/{len(broll_clips)} clips")
+            self.logger.info(f"B-roll fetch complete: {success_count}/{num_clips_needed} clips for segment {segment_id}")
             return success_count > 0
 
         except Exception as e:
@@ -454,8 +510,19 @@ def main():
     parser.add_argument('--duration', type=float, help='Target duration in seconds (for --query mode)')
     parser.add_argument('--api-keys', type=str, default='config/api_keys.json',
                         help='Path to API keys JSON file')
-    parser.add_argument('--audio-dir', type=str, help='Directory containing audio segments (to match duration)')
     parser.add_argument('--log-file', type=str, help='Path to log file')
+
+    # New v2 arguments
+    parser.add_argument('--segment-duration', type=float,
+                        help='Duration of this segment in seconds (from timestamps)')
+    parser.add_argument('--audio-dir', type=str,
+                        help='Directory containing audio segments (legacy, use --segment-duration instead)')
+    parser.add_argument('--cut-frequency', type=float, default=2.5,
+                        help='Target b-roll cut frequency in seconds (default: 2.5)')
+    parser.add_argument('--speed-min', type=float, default=1.2,
+                        help='Minimum speed factor for clips (default: 1.2)')
+    parser.add_argument('--speed-max', type=float, default=2.0,
+                        help='Maximum speed factor for clips (default: 2.0)')
 
     args = parser.parse_args()
 
@@ -490,10 +557,15 @@ def main():
             with open(args.json, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-            success = fetcher.fetch_for_segment(config, args.segment_id, args.output_dir, resolution, args.audio_dir)
+            success = fetcher.fetch_for_segment(
+                config, args.segment_id, args.output_dir, resolution,
+                segment_duration=args.segment_duration,
+                audio_dir=args.audio_dir,
+                cut_frequency=args.cut_frequency,
+                speed_range=(args.speed_min, args.speed_max)
+            )
         else:
             # Standalone mode
-            # Search for media
             results = fetcher.search_pexels(args.query, args.type)
             if not results:
                 results = fetcher.search_pixabay(args.query, args.type)
@@ -502,40 +574,25 @@ def main():
                 print(f"No results found for '{args.query}'", file=sys.stderr)
                 sys.exit(1)
 
-            # Download and process first result
             media_item = results[0]
             success = False
 
-            if args.type == 'video':
-                if 'video_files' in media_item:
-                    video_files = media_item['video_files']
-                    video_file = next((v for v in video_files if v.get('quality') == 'hd'), video_files[0])
-                    download_url = video_file['link']
-                elif 'videos' in media_item:
-                    videos = media_item['videos']
-                    video_file = videos.get('medium', videos.get('small', {}))
-                    download_url = video_file.get('url', '')
-
-                temp_file = os.path.join(args.output_dir, "temp_video.mp4")
-                output_file = os.path.join(args.output_dir, "output_video.mp4")
-
-                if fetcher.download_media(download_url, temp_file):
-                    success = fetcher.process_video(temp_file, output_file, resolution, args.duration)
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-            else:
-                if 'src' in media_item:
-                    download_url = media_item['src'].get('large2x', media_item['src'].get('large'))
-                elif 'largeImageURL' in media_item:
-                    download_url = media_item['largeImageURL']
-
-                temp_file = os.path.join(args.output_dir, "temp_image.jpg")
-                output_file = os.path.join(args.output_dir, "output_image.jpg")
-
-                if fetcher.download_media(download_url, temp_file):
-                    success = fetcher.process_image(temp_file, output_file, resolution)
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
+            download_url = fetcher._get_download_url(media_item, args.type)
+            if download_url:
+                if args.type == 'video':
+                    temp_file = os.path.join(args.output_dir, "temp_video.mp4")
+                    output_file = os.path.join(args.output_dir, "output_video.mp4")
+                    if fetcher.download_media(download_url, temp_file):
+                        success = fetcher.process_video(temp_file, output_file, resolution, args.duration)
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                else:
+                    temp_file = os.path.join(args.output_dir, "temp_image.jpg")
+                    output_file = os.path.join(args.output_dir, "output_image.jpg")
+                    if fetcher.download_media(download_url, temp_file):
+                        success = fetcher.process_image(temp_file, output_file, resolution)
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
 
         sys.exit(0 if success else 1)
 

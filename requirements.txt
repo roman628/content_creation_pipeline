@@ -11,6 +11,12 @@ ffmpeg-python>=0.2.0
 Pillow>=10.0.0
 python-dotenv>=1.0.0
 
+# Subtitle animation
+pysubs2>=1.7.0
+
+# Audio analysis (beat detection for future use)
+librosa>=0.10.0
+
 # Additional utilities
 numpy>=1.24.0
 tqdm>=4.66.0

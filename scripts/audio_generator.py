@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Audio Generator using Kokoro-ONNX TTS
-Generates audio segments from text using GPU-accelerated TTS
+Generates audio from text using GPU-accelerated TTS.
+Supports single full-audio generation with word-level timestamps.
 """
 
 import argparse
@@ -77,8 +78,8 @@ class AudioGenerator:
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
 
-    def generate_audio_from_text(self, text: str, output_path: str) -> bool:
-        """Generate audio file from text."""
+    def generate_audio_from_text(self, text: str, output_path: str) -> Optional[float]:
+        """Generate audio file from text. Returns duration in seconds, or None on failure."""
         try:
             self.logger.info(f"Generating audio for: '{text[:50]}...'")
 
@@ -86,16 +87,18 @@ class AudioGenerator:
             self._init_pipeline()
 
             # Generate audio using Kokoro pipeline
+            # Collect all chunks from the generator and concatenate
             generator = self.pipeline(text, voice=self.voice_name)
 
-            # Get the audio from the generator
-            audio_array = None
+            audio_chunks = []
             for i, (gs, ps, audio) in enumerate(generator):
-                audio_array = audio
-                break  # Take first output
+                audio_chunks.append(audio)
 
-            if audio_array is None:
+            if not audio_chunks:
                 raise RuntimeError("No audio generated")
+
+            # Concatenate all audio chunks
+            audio_array = np.concatenate(audio_chunks) if len(audio_chunks) > 1 else audio_chunks[0]
 
             # Save audio file (Kokoro returns numpy array at 24kHz)
             sf.write(output_path, audio_array, 24000)
@@ -103,13 +106,145 @@ class AudioGenerator:
             duration = len(audio_array) / 24000
             self.logger.info(f"Audio generated: {output_path} (duration: {duration:.2f}s)")
 
-            return True
+            return duration
         except Exception as e:
             self.logger.error(f"Failed to generate audio: {e}")
+            return None
+
+    def generate_full_audio(self, json_path: str, output_dir: str) -> bool:
+        """Generate single audio file from all segments, transcribe, and output timestamps."""
+        try:
+            # Load JSON configuration
+            with open(json_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Extract voice name if specified in JSON
+            if 'voice_name' in config:
+                self.voice_name = config['voice_name']
+                self.logger.info(f"Using voice: {self.voice_name}")
+
+            script_segments = config.get('script_segments', [])
+            if not script_segments:
+                self.logger.error("No script_segments found in JSON")
+                return False
+
+            # Step 1: Join all segment texts and track word boundaries
+            full_text_parts = []
+            segment_word_boundaries = []
+            cumulative_words = 0
+
+            for seg in script_segments:
+                text = seg['audio_text'].strip()
+                words_in_segment = len(text.split())
+                segment_word_boundaries.append({
+                    'segment_id': seg['segment_id'],
+                    'start_word_idx': cumulative_words,
+                    'end_word_idx': cumulative_words + words_in_segment - 1,
+                    'text': text
+                })
+                cumulative_words += words_in_segment
+                full_text_parts.append(text)
+
+            full_text = " ".join(full_text_parts)
+            self.logger.info(f"Full script: {len(full_text_parts)} segments, {cumulative_words} words")
+
+            # Step 2: Generate single audio file
+            full_audio_path = os.path.join(output_dir, "full_audio.wav")
+            duration = self.generate_audio_from_text(full_text, full_audio_path)
+            if duration is None:
+                return False
+
+            self.logger.info(f"Full audio generated: {duration:.2f}s")
+
+            # Step 3: Transcribe with faster-whisper for word-level timestamps
+            self.logger.info("Transcribing audio for word-level timestamps...")
+            try:
+                from faster_whisper import WhisperModel
+            except ImportError:
+                self.logger.error("faster-whisper not installed. pip install faster-whisper")
+                return False
+
+            device = "cuda" if self.use_gpu else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            model = WhisperModel("base", device=device, compute_type=compute_type)
+
+            segments_iter, info = model.transcribe(
+                full_audio_path,
+                word_timestamps=True,
+                language="en",
+                vad_filter=True
+            )
+
+            word_timestamps = []
+            for segment in segments_iter:
+                if hasattr(segment, 'words') and segment.words:
+                    for word in segment.words:
+                        word_timestamps.append({
+                            'word': word.word.strip(),
+                            'start': round(word.start, 3),
+                            'end': round(word.end, 3)
+                        })
+
+            self.logger.info(f"Transcribed {len(word_timestamps)} words (expected {cumulative_words})")
+
+            if not word_timestamps:
+                self.logger.error("No words transcribed")
+                return False
+
+            # Step 4: Map words back to segments using cumulative word index
+            segment_timings = []
+            for boundary in segment_word_boundaries:
+                seg_start_idx = boundary['start_word_idx']
+                seg_end_idx = boundary['end_word_idx']
+
+                # Clamp to actual transcribed word count
+                seg_start_idx = min(seg_start_idx, len(word_timestamps) - 1)
+                seg_end_idx = min(seg_end_idx, len(word_timestamps) - 1)
+
+                start_time = word_timestamps[seg_start_idx]['start']
+                end_time = word_timestamps[seg_end_idx]['end']
+
+                segment_timings.append({
+                    'segment_id': boundary['segment_id'],
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'duration': round(end_time - start_time, 3),
+                    'word_start_idx': seg_start_idx,
+                    'word_end_idx': seg_end_idx
+                })
+
+                self.logger.info(
+                    f"Segment {boundary['segment_id']}: "
+                    f"{start_time:.2f}s - {end_time:.2f}s "
+                    f"({end_time - start_time:.2f}s)"
+                )
+
+            # Step 5: Write timestamps JSON
+            timestamps_data = {
+                'full_audio_path': 'full_audio.wav',
+                'total_duration': round(duration, 3),
+                'words': word_timestamps,
+                'segments': segment_timings
+            }
+
+            timestamps_path = os.path.join(output_dir, "audio_timestamps.json")
+            with open(timestamps_path, 'w', encoding='utf-8') as f:
+                json.dump(timestamps_data, f, indent=2, ensure_ascii=False)
+
+            self.logger.info(f"Timestamps written: {timestamps_path}")
+            self.logger.info(f"Full audio generation complete: {duration:.2f}s, {len(word_timestamps)} words")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error generating full audio: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def generate_from_json(self, json_path: str, output_dir: str) -> bool:
-        """Generate audio segments from JSON configuration."""
+        """Generate audio segments from JSON configuration (legacy per-segment mode)."""
         try:
             # Load JSON configuration
             with open(json_path, 'r', encoding='utf-8') as f:
@@ -143,7 +278,7 @@ class AudioGenerator:
 
                 output_file = os.path.join(output_dir, f"segment_{segment_id:03d}.wav")
 
-                if self.generate_audio_from_text(audio_text, output_file):
+                if self.generate_audio_from_text(audio_text, output_file) is not None:
                     success_count += 1
                 else:
                     self.logger.error(f"Failed to generate audio for segment {segment_id}")
@@ -169,6 +304,8 @@ def main():
                         help='Voice name (af_heart, af_bella, af_sarah, af_adam, af_michael)')
     parser.add_argument('--output-dir', type=str, help='Output directory for audio segments')
     parser.add_argument('--output', type=str, help='Output file path (for --text mode)')
+    parser.add_argument('--full-audio', action='store_true',
+                        help='Generate single audio file from all segments with timestamps')
     parser.add_argument('--use-gpu', action='store_true', default=True, help='Use GPU acceleration (default: True)')
     parser.add_argument('--no-gpu', dest='use_gpu', action='store_false', help='Disable GPU acceleration')
     parser.add_argument('--log-file', type=str, help='Path to log file')
@@ -192,12 +329,14 @@ def main():
 
         # Process based on mode
         if args.json:
-            # Helper script mode
-            success = generator.generate_from_json(args.json, args.output_dir)
+            if args.full_audio:
+                success = generator.generate_full_audio(args.json, args.output_dir)
+            else:
+                success = generator.generate_from_json(args.json, args.output_dir)
         else:
             # Standalone mode
             os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else '.', exist_ok=True)
-            success = generator.generate_audio_from_text(args.text, args.output)
+            success = generator.generate_audio_from_text(args.text, args.output) is not None
 
         sys.exit(0 if success else 1)
 

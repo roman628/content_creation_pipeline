@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Video Assembler
-Combines audio segments, b-roll, subtitles, and background music into final video
+Combines b-roll clips, single audio file, and background music into final video.
+V2: Works with single full audio and timestamps-based assembly.
 """
 
 import argparse
@@ -67,7 +68,7 @@ class VideoAssembler:
         """Get duration of video file in seconds."""
         try:
             probe = ffmpeg.probe(video_path)
-            duration = float(probe['streams'][0]['duration'])
+            duration = float(probe['format']['duration'])
             return duration
         except Exception as e:
             self.logger.error(f"Failed to get video duration: {e}")
@@ -87,7 +88,6 @@ class VideoAssembler:
                     f.write(f"file '{abs_path}'\n")
 
             # Run ffmpeg concat with re-encoding for better compatibility
-            # Re-encoding ensures smooth transitions even if clips have slight parameter differences
             cmd = [
                 'ffmpeg',
                 '-f', 'concat',
@@ -126,39 +126,68 @@ class VideoAssembler:
             return False
 
     def combine_audio_video(self, video_path: str, audio_path: str, output_path: str) -> bool:
-        """Combine video with audio track."""
+        """Combine video with audio track, handling duration mismatches.
+
+        If video is longer than audio: trims video.
+        If video is shorter than audio: loops video to fill.
+        """
         try:
             self.logger.info(f"Combining video and audio")
 
-            # Get durations to check if they match
             video_duration = self.get_video_duration(video_path)
             audio_duration = self.get_audio_duration(audio_path)
 
             self.logger.info(f"Video duration: {video_duration:.2f}s, Audio duration: {audio_duration:.2f}s")
 
-            video_input = ffmpeg.input(video_path)
-            audio_input = ffmpeg.input(audio_path)
+            if video_duration < audio_duration - 0.1:
+                # Video is shorter than audio — loop the video to fill
+                self.logger.info(f"Video shorter than audio, looping video to match {audio_duration:.2f}s")
+                import subprocess
 
-            # Trim video to exact audio duration if needed
-            if abs(video_duration - audio_duration) > 0.1:
-                self.logger.info(f"Trimming video to match audio duration: {audio_duration:.2f}s")
-                video_stream = video_input.video.trim(duration=audio_duration).setpts('PTS-STARTPTS')
+                cmd = [
+                    'ffmpeg',
+                    '-stream_loop', '-1',  # Loop video indefinitely
+                    '-i', video_path,
+                    '-i', audio_path,
+                    '-map', '0:v',
+                    '-map', '1:a',
+                    '-t', str(audio_duration),  # Cut at audio duration
+                    '-c:v', 'libx264',
+                    '-preset', 'medium',
+                    '-crf', '23',
+                    '-c:a', 'aac',
+                    '-b:a', '192k',
+                    '-shortest',
+                    '-y', output_path
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    self.logger.error(f"FFmpeg loop+combine error: {result.stderr}")
+                    return False
             else:
-                video_stream = video_input.video
+                video_input = ffmpeg.input(video_path)
+                audio_input = ffmpeg.input(audio_path)
 
-            # Combine with audio
-            output = ffmpeg.output(
-                video_stream,
-                audio_input.audio,
-                output_path,
-                vcodec='libx264',
-                preset='medium',
-                crf=23,
-                acodec='aac',
-                audio_bitrate='192k'
-            )
+                # Trim video to exact audio duration if needed
+                if video_duration - audio_duration > 0.1:
+                    self.logger.info(f"Trimming video to match audio duration: {audio_duration:.2f}s")
+                    video_stream = video_input.video.trim(duration=audio_duration).setpts('PTS-STARTPTS')
+                else:
+                    video_stream = video_input.video
 
-            ffmpeg.run(output, overwrite_output=True, quiet=True)
+                output = ffmpeg.output(
+                    video_stream,
+                    audio_input.audio,
+                    output_path,
+                    vcodec='libx264',
+                    preset='medium',
+                    crf=23,
+                    acodec='aac',
+                    audio_bitrate='192k'
+                )
+
+                ffmpeg.run(output, overwrite_output=True, quiet=True)
 
             self.logger.info(f"Audio and video combined: {output_path}")
             return True
@@ -235,8 +264,17 @@ class VideoAssembler:
             self.logger.error(f"Failed to select music: {e}")
             return None
 
-    def assemble_video(self, config_path: str, project_dir: str, music_genre: str) -> bool:
-        """Assemble final video from all components."""
+    def assemble_video(self, config_path: str, project_dir: str, music_genre: str,
+                       timestamps_path: Optional[str] = None) -> bool:
+        """Assemble final video from all components.
+
+        V2 flow (when timestamps_path provided):
+        1. Collect ALL b-roll clips across all segments in order
+        2. Concatenate into one continuous video (no audio)
+        3. Combine with single full audio
+        4. Mix background music
+        5. Output final_output.mp4
+        """
         try:
             # Load configuration
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -255,9 +293,125 @@ class VideoAssembler:
             audio_dir = Path(project_dir) / "audio_segments"
             broll_dir = Path(project_dir) / "broll"
 
-            # Step 1: Process each segment
-            segment_videos = []
+            # V2: Single audio + timestamps-based assembly
+            if timestamps_path:
+                return self._assemble_v2(
+                    config, project_dir, music_genre,
+                    timestamps_path, audio_dir, broll_dir, target_duration
+                )
+
+            # Legacy: per-segment assembly
+            return self._assemble_legacy(
+                config, project_dir, music_genre,
+                audio_dir, broll_dir, target_duration
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to assemble video: {e}")
+            return False
+
+    def _assemble_v2(self, config: Dict, project_dir: str, music_genre: str,
+                     timestamps_path: str, audio_dir: Path, broll_dir: Path,
+                     target_duration: float) -> bool:
+        """V2 assembly: single audio + all b-roll clips concatenated globally."""
+        try:
+            # Load timestamps
+            with open(timestamps_path, 'r', encoding='utf-8') as f:
+                timestamps = json.load(f)
+
+            # Step 1: Collect ALL b-roll clips across all segments in order
+            self.logger.info("Collecting all b-roll clips...")
+            all_clips = []
+            for seg_timing in timestamps['segments']:
+                seg_id = seg_timing['segment_id']
+                seg_clips = sorted(broll_dir.glob(f"segment_{seg_id:03d}_clip_*.mp4"))
+                all_clips.extend([str(c) for c in seg_clips])
+                self.logger.info(f"Segment {seg_id}: {len(seg_clips)} clips")
+
+            if not all_clips:
+                self.logger.error("No b-roll clips found")
+                return False
+
+            self.logger.info(f"Total b-roll clips: {len(all_clips)}")
+
+            # Step 2: Concatenate all clips into one continuous video (no audio)
+            temp_all_broll = Path(project_dir) / "temp_all_broll.mp4"
+            self.logger.info("Concatenating all b-roll clips...")
+
+            if not self.concatenate_clips(all_clips, str(temp_all_broll), include_audio=False):
+                return False
+
+            # Step 3: Combine with single full audio
+            full_audio = audio_dir / "full_audio.wav"
+            if not full_audio.exists():
+                self.logger.error(f"Full audio file not found: {full_audio}")
+                return False
+
+            temp_with_audio = Path(project_dir) / "temp_with_audio.mp4"
+            self.logger.info("Combining video with full audio...")
+
+            if not self.combine_audio_video(str(temp_all_broll), str(full_audio), str(temp_with_audio)):
+                return False
+
+            # Step 4: Extract audio for music mixing
+            temp_voiceover = Path(project_dir) / "temp_voiceover.mp3"
+            self.logger.info("Extracting audio for music mixing...")
+
+            try:
+                stream = ffmpeg.input(str(temp_with_audio))
+                stream = ffmpeg.output(stream, str(temp_voiceover), acodec='libmp3lame', audio_bitrate='192k')
+                ffmpeg.run(stream, overwrite_output=True, quiet=True)
+            except Exception as e:
+                self.logger.error(f"Failed to extract audio: {e}")
+                return False
+
+            # Step 5: Mix background music
+            music_file = self.select_random_music(music_genre)
+            audio_for_final = temp_voiceover
+
+            if music_file:
+                mixed_audio = Path(project_dir) / "final_audio_with_music.mp3"
+                if self.mix_background_music(str(temp_voiceover), music_file, str(mixed_audio)):
+                    audio_for_final = mixed_audio
+                else:
+                    self.logger.warning("Failed to mix music, using voiceover only")
+            else:
+                self.logger.warning("No background music found, using voiceover only")
+
+            # Step 6: Create final video with mixed audio
+            final_output = Path(project_dir) / "final_output.mp4"
+            self.logger.info("Creating final video with mixed audio...")
+
+            if not self.combine_audio_video(str(temp_with_audio), str(audio_for_final), str(final_output)):
+                return False
+
+            # Step 7: Validate duration
+            final_duration = self.get_video_duration(str(final_output))
+            duration_diff = abs(final_duration - target_duration)
+
+            self.logger.info(f"Final video duration: {final_duration:.2f}s (target: {target_duration}s)")
+
+            if duration_diff > 1.0:
+                self.logger.warning(f"Duration mismatch: {duration_diff:.2f}s difference")
+            else:
+                self.logger.info("Duration within tolerance")
+
+            # Cleanup temp files
+            self._cleanup_temp_files(project_dir)
+
+            self.logger.info(f"Video assembly complete: {final_output}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"V2 assembly failed: {e}")
+            return False
+
+    def _assemble_legacy(self, config: Dict, project_dir: str, music_genre: str,
+                         audio_dir: Path, broll_dir: Path, target_duration: float) -> bool:
+        """Legacy per-segment assembly (backward compatible)."""
+        try:
             script_segments = config.get('script_segments', [])
+            segment_videos = []
 
             for segment in script_segments:
                 segment_id = segment['segment_id']
@@ -269,16 +423,14 @@ class VideoAssembler:
                     self.logger.error(f"Audio file not found: {audio_file}")
                     continue
 
-                audio_duration = self.get_audio_duration(str(audio_file))
-
-                # Get video clips for this segment (from b-roll, not subtitles)
+                # Get video clips for this segment
                 video_clips = sorted(broll_dir.glob(f"segment_{segment_id:03d}_clip_*.mp4"))
 
                 if not video_clips:
                     self.logger.error(f"No video clips found for segment {segment_id}")
                     continue
 
-                # Concatenate clips if multiple (b-roll has no audio)
+                # Concatenate clips if multiple
                 if len(video_clips) > 1:
                     concat_output = Path(project_dir) / f"temp_segment_{segment_id:03d}_video.mp4"
                     if not self.concatenate_clips([str(c) for c in video_clips], str(concat_output), include_audio=False):
@@ -298,17 +450,13 @@ class VideoAssembler:
                 self.logger.error("No segments were successfully processed")
                 return False
 
-            # Step 2: Concatenate all segments
-            self.logger.info("Concatenating all segments")
+            # Concatenate all segments
             temp_final = Path(project_dir) / "temp_final_no_music.mp4"
-
             if not self.concatenate_clips(segment_videos, str(temp_final)):
                 return False
 
-            # Step 3: Extract audio from concatenated video
+            # Extract audio
             temp_audio = Path(project_dir) / "temp_voiceover.mp3"
-            self.logger.info("Extracting audio for music mixing")
-
             try:
                 stream = ffmpeg.input(str(temp_final))
                 stream = ffmpeg.output(stream, str(temp_audio), acodec='libmp3lame', audio_bitrate='192k')
@@ -317,85 +465,65 @@ class VideoAssembler:
                 self.logger.error(f"Failed to extract audio: {e}")
                 return False
 
-            # Step 4: Mix background music
+            # Mix background music
             music_file = self.select_random_music(music_genre)
-
             if music_file:
                 mixed_audio = Path(project_dir) / "final_audio_with_music.mp3"
                 if self.mix_background_music(str(temp_audio), music_file, str(mixed_audio)):
                     temp_audio = mixed_audio
-                else:
-                    self.logger.warning("Failed to mix music, using voiceover only")
-            else:
-                self.logger.warning("No background music found, using voiceover only")
 
-            # Step 5: Combine final video with mixed audio
+            # Final combination
             final_output = Path(project_dir) / "final_output.mp4"
-            self.logger.info("Creating final video with mixed audio")
-
             try:
-                # Check durations to ensure sync
                 video_duration = self.get_video_duration(str(temp_final))
                 audio_duration = self.get_audio_duration(str(temp_audio))
-                self.logger.info(f"Final video: {video_duration:.2f}s, Final audio: {audio_duration:.2f}s")
 
                 video_input = ffmpeg.input(str(temp_final))
                 audio_input = ffmpeg.input(str(temp_audio))
 
-                # Trim video to match audio duration if needed
                 if abs(video_duration - audio_duration) > 0.1:
-                    self.logger.info(f"Trimming final video to match audio: {audio_duration:.2f}s")
                     video_stream = video_input.video.trim(duration=audio_duration).setpts('PTS-STARTPTS')
                 else:
                     video_stream = video_input.video
 
                 output = ffmpeg.output(
-                    video_stream,
-                    audio_input.audio,
-                    str(final_output),
-                    vcodec='libx264',
-                    acodec='aac',
-                    audio_bitrate='192k',
-                    preset='medium',
-                    crf=23,
-                    movflags='faststart'
+                    video_stream, audio_input.audio, str(final_output),
+                    vcodec='libx264', acodec='aac', audio_bitrate='192k',
+                    preset='medium', crf=23, movflags='faststart'
                 )
-
                 ffmpeg.run(output, overwrite_output=True, quiet=True)
 
             except Exception as e:
                 self.logger.error(f"Failed to create final video: {e}")
                 return False
 
-            # Step 6: Validate duration
+            # Validate
             final_duration = self.get_video_duration(str(final_output))
-            duration_diff = abs(final_duration - target_duration)
-
             self.logger.info(f"Final video duration: {final_duration:.2f}s (target: {target_duration}s)")
 
-            if duration_diff > 1.0:
-                self.logger.warning(f"Duration mismatch: {duration_diff:.2f}s difference")
-            else:
-                self.logger.info("Duration within tolerance")
-
-            # Cleanup temp files
-            self.logger.info("Cleaning up temporary files")
-            temp_files = list(Path(project_dir).glob("temp_*.mp4")) + \
-                        list(Path(project_dir).glob("temp_*.mp3")) + \
-                        list(Path(project_dir).glob("segment_*_final.mp4"))
-
-            for temp_file in temp_files:
-                try:
-                    temp_file.unlink()
-                except:
-                    pass
+            # Cleanup
+            self._cleanup_temp_files(project_dir)
 
             self.logger.info(f"Video assembly complete: {final_output}")
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to assemble video: {e}")
+            self.logger.error(f"Legacy assembly failed: {e}")
             return False
+
+    def _cleanup_temp_files(self, project_dir: str):
+        """Remove temporary files from project directory."""
+        self.logger.info("Cleaning up temporary files")
+        temp_files = (
+            list(Path(project_dir).glob("temp_*.mp4")) +
+            list(Path(project_dir).glob("temp_*.mp3")) +
+            list(Path(project_dir).glob("segment_*_final.mp4"))
+        )
+        for temp_file in temp_files:
+            try:
+                temp_file.unlink()
+            except:
+                pass
 
 
 def main():
@@ -408,6 +536,10 @@ def main():
     parser.add_argument('--music-dir', type=str, default='music', help='Music library directory')
     parser.add_argument('--log-file', type=str, help='Path to log file')
 
+    # New v2 argument
+    parser.add_argument('--timestamps-json', type=str,
+                        help='Path to audio_timestamps.json for v2 assembly')
+
     args = parser.parse_args()
 
     try:
@@ -415,7 +547,10 @@ def main():
         assembler = VideoAssembler(log_file=args.log_file)
 
         # Assemble video
-        success = assembler.assemble_video(args.json, args.project_dir, args.music_genre)
+        success = assembler.assemble_video(
+            args.json, args.project_dir, args.music_genre,
+            timestamps_path=args.timestamps_json
+        )
 
         sys.exit(0 if success else 1)
 

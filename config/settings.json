@@ -42,6 +42,23 @@
     "speed_adjustment_range": [0.8, 0.9],
     "min_clip_duration": 2
   },
+  "subtitle_animation": {
+    "style": "word_by_word_buildup",
+    "words_per_group": 3,
+    "highlight_color": "&H00FFFF&",
+    "normal_color": "&HFFFFFF&",
+    "font": "Impact",
+    "fontsize": 70,
+    "outline_width": 4,
+    "outline_color": "&H000000&",
+    "position": "center",
+    "highlight_scale": 120
+  },
+  "broll": {
+    "cut_frequency_seconds": 2.5,
+    "speed_range": [1.2, 2.0],
+    "query_expansion_suffixes": ["cinematic", "aerial", "close up", "dramatic", "slow motion"]
+  },
   "kokoro_settings": {
     "voice_models": ["af_heart", "af_bella", "af_sarah", "af_adam", "af_michael"],
     "speed": 1.0,

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 AI-Powered Short-Form Video Generation Pipeline
-Main orchestrator script that coordinates all helper scripts
+Main orchestrator script that coordinates all helper scripts.
+V2: Single audio generation, fast b-roll cuts, ASS word-by-word subtitles.
 """
 
 import argparse
@@ -76,14 +77,14 @@ class VideoGenerator:
                     if 'type' in clip and clip['type'] not in ['video', 'image']:
                         raise ValueError(f"Segment {segment['segment_id']} clip {clip_idx}: type must be 'video' or 'image'")
 
-            print(f"✓ Configuration loaded: {config['video_name']}")
+            print(f"Configuration loaded: {config['video_name']}")
             print(f"  Platform: {config['target_platform']}")
             print(f"  Duration: {config['target_duration_seconds']}s")
             print(f"  Segments: {len(config['script_segments'])}")
             return config
 
         except Exception as e:
-            print(f"✗ Error loading configuration: {e}", file=sys.stderr)
+            print(f"Error loading configuration: {e}", file=sys.stderr)
             sys.exit(1)
 
     def clean_previous_runs(self, video_name: str):
@@ -93,14 +94,12 @@ class VideoGenerator:
             if not base_dir.exists():
                 return
 
-            # Find all directories for this video name
             pattern = f"{video_name}_*"
             matching_dirs = sorted(base_dir.glob(pattern), reverse=True)
 
             for project_dir in matching_dirs:
                 final_video = project_dir / "final_output.mp4"
                 if not final_video.exists():
-                    # Incomplete run - delete it
                     print(f"Removing incomplete run: {project_dir.name}")
                     import shutil
                     shutil.rmtree(project_dir)
@@ -115,7 +114,6 @@ class VideoGenerator:
         try:
             video_name = self.config['video_name'].replace(' ', '_')
 
-            # Clean previous incomplete runs if requested
             if self.clean_previous:
                 self.clean_previous_runs(video_name)
 
@@ -151,14 +149,12 @@ class VideoGenerator:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
 
-        # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
 
-        # File handler
         file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(formatter)
@@ -171,7 +167,6 @@ class VideoGenerator:
     def run_helper_script(self, script_name: str, args: str) -> bool:
         """Execute helper script in venv with error handling."""
         try:
-            # Use current Python executable (assumes we're running in venv)
             python_exe = sys.executable
 
             script_path = Path("scripts") / script_name
@@ -192,7 +187,6 @@ class VideoGenerator:
                 text=True
             )
 
-            # Log output
             if result.stdout:
                 for line in result.stdout.strip().split('\n'):
                     self.logger.info(f"  {line}")
@@ -211,7 +205,7 @@ class VideoGenerator:
             return False
 
     def generate_video(self) -> bool:
-        """Main video generation pipeline."""
+        """Main video generation pipeline (V2: single audio + fast cuts + ASS subtitles)."""
         try:
             # Step 1: Create project structure
             print("\n" + "="*70)
@@ -221,32 +215,44 @@ class VideoGenerator:
             self.project_dir = self.create_project_structure()
             self.setup_logging(self.project_dir)
 
-            # Step 2: Generate audio segments
-            print("\n" + "="*70)
-            print("STEP 2: Generating Audio Segments (TTS)")
-            print("="*70)
-
             audio_dir = Path(self.project_dir) / "audio_segments"
+            broll_dir = Path(self.project_dir) / "broll"
             log_file = Path(self.project_dir) / "generation.log"
+
+            # Step 2: Generate SINGLE audio file + transcribe + timestamps
+            print("\n" + "="*70)
+            print("STEP 2: Generating Full Audio (Single TTS + Transcription)")
+            print("="*70)
 
             success = self.run_helper_script(
                 'audio_generator.py',
-                f'--json "{self.config_path}" --output-dir "{audio_dir}" --voice {self.config["voice_name"]} --log-file "{log_file}"'
+                f'--json "{self.config_path}" --output-dir "{audio_dir}" '
+                f'--voice {self.config["voice_name"]} --full-audio --log-file "{log_file}"'
             )
 
             if not success:
                 self.logger.error("Audio generation failed")
                 return False
 
-            # Step 3: Fetch b-roll for each segment
+            # Load timestamps for subsequent steps
+            timestamps_path = audio_dir / "audio_timestamps.json"
+            if not timestamps_path.exists():
+                self.logger.error("audio_timestamps.json not found after audio generation")
+                return False
+
+            with open(timestamps_path, 'r', encoding='utf-8') as f:
+                timestamps = json.load(f)
+
+            self.logger.info(f"Audio timestamps loaded: {len(timestamps['words'])} words, "
+                           f"{len(timestamps['segments'])} segments, "
+                           f"{timestamps['total_duration']:.2f}s total")
+
+            # Step 3: Fetch b-roll for each segment (with fast cuts)
             print("\n" + "="*70)
-            print("STEP 3: Fetching B-Roll Footage")
+            print("STEP 3: Fetching B-Roll Footage (Fast Cuts)")
             print("="*70)
 
-            broll_dir = Path(self.project_dir) / "broll"
             target_platform = self.config['target_platform']
-
-            # Get resolution for platform
             platform_resolutions = {
                 "youtube_shorts": "1080x1920",
                 "tiktok": "1080x1920",
@@ -255,20 +261,37 @@ class VideoGenerator:
             }
             resolution = platform_resolutions.get(target_platform, "1080x1920")
 
-            for segment in self.config['script_segments']:
-                segment_id = segment['segment_id']
-                self.logger.info(f"Fetching b-roll for segment {segment_id}")
+            # Load broll settings from settings.json
+            broll_settings = {}
+            settings_path = Path("config/settings.json")
+            if settings_path.exists():
+                with open(settings_path, 'r') as f:
+                    all_settings = json.load(f)
+                broll_settings = all_settings.get('broll', {})
+
+            cut_freq = broll_settings.get('cut_frequency_seconds', 2.5)
+            speed_range = broll_settings.get('speed_range', [1.2, 2.0])
+
+            for seg_timing in timestamps['segments']:
+                segment_id = seg_timing['segment_id']
+                segment_duration = seg_timing['duration']
+
+                self.logger.info(f"Fetching b-roll for segment {segment_id} ({segment_duration:.2f}s)")
 
                 success = self.run_helper_script(
                     'broll_fetcher.py',
-                    f'--json "{self.config_path}" --segment-id {segment_id} --output-dir "{broll_dir}" --resolution {resolution} --audio-dir "{audio_dir}" --log-file "{log_file}"'
+                    f'--json "{self.config_path}" --segment-id {segment_id} '
+                    f'--output-dir "{broll_dir}" --resolution {resolution} '
+                    f'--segment-duration {segment_duration} '
+                    f'--cut-frequency {cut_freq} '
+                    f'--speed-min {speed_range[0]} --speed-max {speed_range[1]} '
+                    f'--log-file "{log_file}"'
                 )
 
                 if not success:
                     self.logger.warning(f"B-roll fetch failed for segment {segment_id}")
-                    # Continue with other segments
 
-            # Step 4: Assemble video (audio + b-roll + music)
+            # Step 4: Assemble video (single audio + all b-roll + music)
             print("\n" + "="*70)
             print("STEP 4: Assembling Video (Audio + B-Roll + Music)")
             print("="*70)
@@ -277,62 +300,40 @@ class VideoGenerator:
 
             success = self.run_helper_script(
                 'video_assembler.py',
-                f'--json "{self.config_path}" --project-dir "{self.project_dir}" --music-genre {music_genre} --log-file "{log_file}"'
+                f'--json "{self.config_path}" --project-dir "{self.project_dir}" '
+                f'--music-genre {music_genre} '
+                f'--timestamps-json "{timestamps_path}" '
+                f'--log-file "{log_file}"'
             )
 
             if not success:
                 self.logger.error("Video assembly failed")
                 return False
 
-            # Step 5: Add subtitles to final video
+            # Step 5: Add ASS subtitles using pre-computed word timestamps
             print("\n" + "="*70)
-            print("STEP 5: Adding Subtitles to Final Video")
+            print("STEP 5: Adding Word-by-Word Animated Subtitles")
             print("="*70)
 
-            # Determine subtitle style based on platform
             style = "tiktok" if target_platform in ["tiktok", "instagram_reels"] else "youtube_shorts"
 
-            # Concatenate all audio segments for transcription
-            temp_full_audio = Path(self.project_dir) / "temp_full_audio.wav"
-            audio_files = sorted(audio_dir.glob("segment_*.wav"))
+            final_video_no_subs = Path(self.project_dir) / "final_output.mp4"
+            final_video_with_subs = Path(self.project_dir) / "final_output_with_subtitles.mp4"
 
-            if audio_files:
-                # Concatenate audio segments
-                import subprocess
-                concat_list = Path(self.project_dir) / "audio_concat_list.txt"
-                with open(concat_list, 'w') as f:
-                    for audio_file in audio_files:
-                        abs_path = audio_file.absolute().as_posix()
-                        f.write(f"file '{abs_path}'\n")
+            success = self.run_helper_script(
+                'subtitle_generator.py',
+                f'--video "{final_video_no_subs}" --output "{final_video_with_subs}" '
+                f'--timestamps-json "{timestamps_path}" '
+                f'--style {style} --log-file "{log_file}"'
+            )
 
-                concat_cmd = [
-                    'ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list),
-                    '-c', 'copy', '-y', str(temp_full_audio)
-                ]
-                subprocess.run(concat_cmd, capture_output=True, check=True)
-
-                # Generate subtitles on final video
-                final_video_no_subs = Path(self.project_dir) / "final_output.mp4"
-                final_video_with_subs = Path(self.project_dir) / "final_output_with_subtitles.mp4"
-
-                success = self.run_helper_script(
-                    'subtitle_generator.py',
-                    f'--video "{final_video_no_subs}" --output "{final_video_with_subs}" --style {style} --log-file "{log_file}"'
-                )
-
-                if success:
-                    # Replace original with subtitled version
-                    import shutil
-                    shutil.move(str(final_video_with_subs), str(final_video_no_subs))
-                    self.logger.info("Subtitles added to final video")
-                else:
-                    self.logger.warning("Subtitle generation failed, keeping video without subtitles")
-
-                # Cleanup temp files
-                if temp_full_audio.exists():
-                    temp_full_audio.unlink()
-                if concat_list.exists():
-                    concat_list.unlink()
+            if success:
+                # Replace original with subtitled version
+                import shutil
+                shutil.move(str(final_video_with_subs), str(final_video_no_subs))
+                self.logger.info("Subtitles added to final video")
+            else:
+                self.logger.warning("Subtitle generation failed, keeping video without subtitles")
 
             # Step 6: Validate final video
             print("\n" + "="*70)
@@ -345,7 +346,6 @@ class VideoGenerator:
                 self.logger.error("Final video file not found")
                 return False
 
-            # Check duration
             target_duration = self.config['target_duration_seconds']
             actual_duration = self.get_video_duration(str(final_video))
             duration_diff = abs(actual_duration - target_duration)
@@ -355,11 +355,11 @@ class VideoGenerator:
             self.logger.info(f"Difference: {duration_diff:.2f}s")
 
             if duration_diff > 1.0:
-                self.logger.warning("Duration exceeds tolerance (±1s). Manual review recommended.")
-                print("\n⚠ Warning: Duration mismatch detected")
+                self.logger.warning("Duration exceeds tolerance. Manual review recommended.")
+                print("\nWarning: Duration mismatch detected")
             else:
                 self.logger.info("Duration within tolerance")
-                print("\n✓ Duration validation passed")
+                print("\nDuration validation passed")
 
             # Success!
             print("\n" + "="*70)
@@ -368,7 +368,7 @@ class VideoGenerator:
             print(f"\nFinal video: {final_video}")
             print(f"Project folder: {self.project_dir}")
             print(f"Duration: {actual_duration:.2f}s")
-            print(f"\n✓ Video generated successfully!")
+            print(f"\nVideo generated successfully!")
 
             self.logger.info("="*70)
             self.logger.info("Video generation completed successfully")
@@ -396,10 +396,10 @@ class VideoGenerator:
 
 def main():
     print("""
-    ╔═══════════════════════════════════════════════════════════════╗
-    ║   AI-Powered Short-Form Video Generation Pipeline            ║
-    ║   Transform JSON configs into publish-ready videos           ║
-    ╚═══════════════════════════════════════════════════════════════╝
+    ================================================================
+       AI-Powered Short-Form Video Generation Pipeline v2
+       Single Audio | Fast B-Roll Cuts | Animated Subtitles
+    ================================================================
     """)
 
     parser = argparse.ArgumentParser(
